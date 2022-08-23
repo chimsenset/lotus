@@ -10,7 +10,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"math/bits"
 	"os"
 	"runtime"
@@ -36,11 +38,36 @@ import (
 
 var _ storiface.Storage = &Sealer{}
 
-func New(sectors SectorProvider) (*Sealer, error) {
+func New(sectors SectorProvider, pledgeSectorPath string) (*Sealer, error) {
+
 	sb := &Sealer{
 		sectors: sectors,
 
+		pledgeSectorPath: pledgeSectorPath,
+		pledgeSectorCid:  cid.Undef,
+
 		stopping: make(chan struct{}),
+	}
+
+	if data, err := ioutil.ReadFile(pledgeSectorPath + "/cid"); err != nil {
+		log.Warnf("read pledge sector cid error: %s", err.Error())
+	} else {
+		if pledgeSectorCid, err := cid.Decode(string(data)); err != nil {
+			log.Warnf("read pledge sector cid error: %s", err.Error())
+			sb.pledgeSectorCid = cid.Undef
+		} else {
+			sb.pledgeSectorCid = pledgeSectorCid
+		}
+	}
+
+	if sb.pledgeSectorCid.Defined() {
+		_, err := os.Stat(sb.pledgeSectorPath + "/sector")
+		if err != nil {
+			log.Errorf("pledge sector does not exist: %v", err)
+			sb.pledgeSectorExist = false
+		} else {
+			sb.pledgeSectorExist = true
+		}
 	}
 
 	return sb, nil
@@ -173,6 +200,39 @@ func (sb *Sealer) DataCid(ctx context.Context, pieceSize abi.UnpaddedPieceSize, 
 }
 
 func (sb *Sealer) AddPiece(ctx context.Context, sector storiface.SectorRef, existingPieceSizes []abi.UnpaddedPieceSize, pieceSize abi.UnpaddedPieceSize, file storiface.Data) (abi.PieceInfo, error) {
+
+	var err error
+	var stagedPath storiface.SectorPaths
+	var stagedFile *partialfile.PartialFile
+	var done func()
+
+	defer func() {
+		if done != nil {
+			done()
+		}
+
+		if stagedFile != nil {
+			if err := stagedFile.Close(); err != nil {
+				log.Errorf("closing staged file: %+v", err)
+			}
+		}
+	}()
+
+	if sb.pledgeSectorExist && sb.isPledgeRequest(len(existingPieceSizes), pieceSize) {
+		// 请求是一个CC扇区， 并且CC扇区模版也存在， 这里执行拷贝数据操作
+		stagedPath, done, err = sb.sectors.AcquireSector(ctx, sector, 0, storiface.FTUnsealed, storiface.PathSealing)
+		if err != nil {
+			return abi.PieceInfo{}, fmt.Errorf("acquire unsealed sector: %w", err)
+		}
+		if err = sb.copyPledgeSector(sb.pledgeSectorPath+"/sector", stagedPath.Unsealed); err != nil {
+			return abi.PieceInfo{}, fmt.Errorf("from pledge sector: %w", err)
+		}
+		return abi.PieceInfo{
+			Size:     pieceSize.Padded(),
+			PieceCID: sb.pledgeSectorCid,
+		}, nil
+	}
+
 	// TODO: allow tuning those:
 	chunk := abi.PaddedPieceSize(4 << 20)
 	parallel := runtime.NumCPU()
@@ -193,22 +253,6 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storiface.SectorRef, exis
 		return abi.PieceInfo{}, xerrors.Errorf("can't add %d byte piece to sector %v with %d bytes of existing pieces", pieceSize, sector, offset)
 	}
 
-	var done func()
-	var stagedFile *partialfile.PartialFile
-
-	defer func() {
-		if done != nil {
-			done()
-		}
-
-		if stagedFile != nil {
-			if err := stagedFile.Close(); err != nil {
-				log.Errorf("closing staged file: %+v", err)
-			}
-		}
-	}()
-
-	var stagedPath storiface.SectorPaths
 	if len(existingPieceSizes) == 0 {
 		stagedPath, done, err = sb.sectors.AcquireSector(ctx, sector, 0, storiface.FTUnsealed, storiface.PathSealing)
 		if err != nil {
@@ -352,6 +396,20 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storiface.SectorRef, exis
 		}
 
 		pieceCID = paddedCid
+	}
+
+	if sb.isPledgeRequest(len(existingPieceSizes), pieceSize) {
+		if err := ioutil.WriteFile(sb.pledgeSectorPath+"/cid", []byte(sb.pledgeSectorCid.String()), 0644); err != nil {
+			log.Errorf("write pledge sector cid error: %s", err.Error())
+			return abi.PieceInfo{}, err
+		}
+
+		if err := sb.copyPledgeSector(stagedPath.Unsealed, sb.pledgeSectorPath+"/sector"); err != nil {
+			log.Errorf("write pledge sector sector error: %s", err.Error())
+			return abi.PieceInfo{}, err
+		}
+		sb.pledgeSectorCid = pieceCID
+		sb.pledgeSectorExist = true
 	}
 
 	return abi.PieceInfo{

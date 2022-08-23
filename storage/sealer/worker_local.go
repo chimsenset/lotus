@@ -37,6 +37,9 @@ type WorkerConfig struct {
 	// os.Hostname if not set
 	Name string
 
+	// CC sector path
+	PledgeSectorPath string
+
 	// IgnoreResourceFiltering enables task distribution to happen on this
 	// worker regardless of its currently available resources. Used in testing
 	// with the local worker.
@@ -61,6 +64,8 @@ type LocalWorker struct {
 
 	name string
 
+	pledgeSectorPath string
+
 	// see equivalent field on WorkerConfig.
 	ignoreResources bool
 
@@ -84,11 +89,12 @@ func newLocalWorker(executor ExecutorFunc, wcfg WorkerConfig, envLookup EnvFunc,
 	}
 
 	w := &LocalWorker{
-		storage:    store,
-		localStore: local,
-		sindex:     sindex,
-		ret:        ret,
-		name:       wcfg.Name,
+		storage:          store,
+		localStore:       local,
+		sindex:           sindex,
+		ret:              ret,
+		name:             wcfg.Name,
+		pledgeSectorPath: wcfg.PledgeSectorPath,
 
 		ct: &workerCallTracker{
 			st: cst,
@@ -181,7 +187,7 @@ func (l *localWorkerPathProvider) AcquireSector(ctx context.Context, sector stor
 }
 
 func (l *LocalWorker) ffiExec() (storiface.Storage, error) {
-	return ffiwrapper.New(&localWorkerPathProvider{w: l})
+	return ffiwrapper.New(&localWorkerPathProvider{w: l}, l.pledgeSectorPath)
 }
 
 type ReturnType string
@@ -361,7 +367,6 @@ func (l *LocalWorker) AddPiece(ctx context.Context, sector storiface.SectorRef, 
 	if err != nil {
 		return storiface.UndefCall, err
 	}
-
 	return l.asyncCall(ctx, sector, AddPiece, func(ctx context.Context, ci storiface.CallID) (interface{}, error) {
 		return sb.AddPiece(ctx, sector, epcs, sz, r)
 	})

@@ -176,6 +176,12 @@ var runCmd = &cli.Command{
 			EnvVars:     []string{"LOTUS_WORKER_NAME"},
 			DefaultText: "hostname",
 		},
+		&cli.StringFlag{
+			Name:        "pledge-sector-path",
+			Usage:       "pledge cc sector path",
+			EnvVars:     []string{"PLEDGE_SECTOR_PATH"},
+			DefaultText: "/root/.lotusworker/pledge",
+		},
 		&cli.BoolFlag{
 			Name:    "addpiece",
 			Usage:   "enable addpiece",
@@ -546,6 +552,7 @@ var runCmd = &cli.Command{
 				MaxParallelChallengeReads: cctx.Int("post-parallel-reads"),
 				ChallengeReadTimeout:      cctx.Duration("post-read-timeout"),
 				Name:                      cctx.String("name"),
+				PledgeSectorPath:          cctx.String("pledge-sector-path"),
 			}, remote, localStore, nodeApi, nodeApi, wsts),
 			LocalStore: localStore,
 			Storage:    lr,
