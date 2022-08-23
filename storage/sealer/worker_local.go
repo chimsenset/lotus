@@ -110,6 +110,7 @@ func newLocalWorker(executor ExecutorFunc, wcfg WorkerConfig, envLookup EnvFunc,
 	}
 
 	ffiwrapper.ConfigADT(w.pledgeSectorPath)
+	log.Infof("pledge sector path: %s", w.pledgeSectorPath)
 
 	if w.name == "" {
 		var err error
