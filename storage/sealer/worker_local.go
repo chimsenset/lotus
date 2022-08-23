@@ -187,7 +187,7 @@ func (l *localWorkerPathProvider) AcquireSector(ctx context.Context, sector stor
 }
 
 func (l *LocalWorker) ffiExec() (storiface.Storage, error) {
-	return ffiwrapper.New(&localWorkerPathProvider{w: l}, l.pledgeSectorPath)
+	return ffiwrapper.NewWorker(&localWorkerPathProvider{w: l}, l.pledgeSectorPath)
 }
 
 type ReturnType string

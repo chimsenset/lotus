@@ -38,7 +38,17 @@ import (
 
 var _ storiface.Storage = &Sealer{}
 
-func New(sectors SectorProvider, pledgeSectorPath string) (*Sealer, error) {
+func New(sectors SectorProvider) (*Sealer, error) {
+	sb := &Sealer{
+		sectors: sectors,
+
+		stopping: make(chan struct{}),
+	}
+
+	return sb, nil
+}
+
+func NewWorker(sectors SectorProvider, pledgeSectorPath string) (*Sealer, error) {
 
 	sb := &Sealer{
 		sectors: sectors,
