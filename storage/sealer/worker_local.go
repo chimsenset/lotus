@@ -109,7 +109,7 @@ func newLocalWorker(executor ExecutorFunc, wcfg WorkerConfig, envLookup EnvFunc,
 		closing:              make(chan struct{}),
 	}
 
-	ffiwrapper.ConfigADT(w.pledgeSectorPath)
+	ffiwrapper.APT.Config(w.pledgeSectorPath)
 	log.Infof("pledge sector path: %s", w.pledgeSectorPath)
 
 	if w.name == "" {

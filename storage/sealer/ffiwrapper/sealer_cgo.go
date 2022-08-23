@@ -197,15 +197,15 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storiface.SectorRef, exis
 		}
 	}()
 
-	if IsADTExist() && sb.isPledgeRequest(len(existingPieceSizes), pieceSize) {
+	if APT.IsExist() && sb.isPledgeRequest(len(existingPieceSizes), pieceSize) {
 		// 请求是一个CC扇区， 并且CC扇区模版也存在， 这里执行拷贝数据操作
 		stagedPath, done, err = sb.sectors.AcquireSector(ctx, sector, 0, storiface.FTUnsealed, storiface.PathSealing)
 		if err != nil {
 			return abi.PieceInfo{}, fmt.Errorf("acquire unsealed sector: %w", err)
 		}
 
-		pieceCID, err := GetADTPieceCID()
-		err = GetADTData(stagedPath.Unsealed)
+		pieceCID, err := APT.GetPieceCID()
+		err = APT.GetData(stagedPath.Unsealed)
 		if err == nil {
 			return abi.PieceInfo{
 				Size:     pieceSize.Padded(),
@@ -381,11 +381,11 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storiface.SectorRef, exis
 		pieceCID = paddedCid
 	}
 
-	if !IsADTExist() && sb.isPledgeRequest(len(existingPieceSizes), pieceSize) {
-		if err := SetADTData(stagedPath.Unsealed); err != nil {
+	if !APT.IsExist() && sb.isPledgeRequest(len(existingPieceSizes), pieceSize) {
+		if err := APT.SetData(stagedPath.Unsealed); err != nil {
 			log.Errorf("set pledge sector error: %s", err.Error())
 		}
-		if err := SetADTPieceCID(pieceCID); err != nil {
+		if err := APT.SetPieceCID(pieceCID); err != nil {
 			log.Errorf("set pledge cid error: %s", err.Error())
 		}
 	}

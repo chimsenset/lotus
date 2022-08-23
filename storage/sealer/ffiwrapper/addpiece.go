@@ -8,53 +8,46 @@ import (
 	"os"
 )
 
-type addPieceTemplate struct {
-	exist      bool
-	parentPath string
-	dataPath   string
-	cidPath    string
+type AddPieceTemplate struct {
+	Exist      bool
+	ParentPath string
+	DataPath   string
+	CidPath    string
 }
 
-var instance *addPieceTemplate
-
-func GetADT() *addPieceTemplate {
-	if instance == nil {
-		return &addPieceTemplate{}
-	}
-	return instance
+var APT = AddPieceTemplate{
+	Exist: false,
 }
 
-func ConfigADT(pledgeSectorPath string) {
-	adt := GetADT()
-	adt.parentPath = pledgeSectorPath
-	adt.exist = false
-	adt.dataPath = adt.parentPath + "/sector"
-	adt.cidPath = adt.parentPath + "/cid"
+func (a *AddPieceTemplate) Config(psp string) {
+	a.Exist = false
+	a.ParentPath = psp
+	a.DataPath = a.ParentPath + "/sector"
+	a.CidPath = a.ParentPath + "/cid"
 }
 
-func IsADTExist() bool {
-	adt := GetADT()
-	if adt.exist {
+func (a *AddPieceTemplate) IsExist() bool {
+	if a.Exist {
 		return true
 	}
 
-	_, err := os.Stat(adt.dataPath)
+	_, err := os.Stat(a.DataPath)
 	if err != nil {
 		log.Errorf("pledge sector does not exist: %v", err)
 		return false
 	}
-	_, err = os.Stat(adt.cidPath)
+	_, err = os.Stat(a.CidPath)
 	if err != nil {
 		log.Errorf("pledge cid does not exist: %v", err)
 		return false
 	}
 
-	adt.exist = true
-	return adt.exist
+	a.Exist = true
+	return a.Exist
 }
 
-func GetADTPieceCID() (cid.Cid, error) {
-	cidData, err := ioutil.ReadFile(GetADT().cidPath)
+func (a *AddPieceTemplate) GetPieceCID() (cid.Cid, error) {
+	cidData, err := ioutil.ReadFile(a.CidPath)
 	if err != nil {
 		return cid.Undef, err
 	}
@@ -65,19 +58,19 @@ func GetADTPieceCID() (cid.Cid, error) {
 	return pieceCID, nil
 }
 
-func SetADTPieceCID(pieceCID cid.Cid) error {
-	return ioutil.WriteFile(GetADT().cidPath, pieceCID.Bytes(), 0644)
+func (a *AddPieceTemplate) SetPieceCID(pieceCID cid.Cid) error {
+	return ioutil.WriteFile(a.CidPath, pieceCID.Bytes(), 0644)
 }
 
-func GetADTData(unsealed string) error {
-	return CopyPledgeSector(GetADT().dataPath, unsealed)
+func (a *AddPieceTemplate) GetData(unsealed string) error {
+	return CopySector(a.DataPath, unsealed)
 }
 
-func SetADTData(unsealed string) error {
-	return CopyPledgeSector(unsealed, GetADT().dataPath)
+func (a *AddPieceTemplate) SetData(unsealed string) error {
+	return CopySector(unsealed, a.DataPath)
 }
 
-func CopyPledgeSector(source string, dest string) error {
+func CopySector(source string, dest string) error {
 	log.Errorf("copy pledge sector source: %s, dest: %s", source, dest)
 	sourceFile, err := os.Open(source)
 	if err != nil {
