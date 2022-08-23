@@ -78,6 +78,7 @@ func SetADTData(unsealed string) error {
 }
 
 func CopyPledgeSector(source string, dest string) error {
+	log.Debugf("copy pledge sector source: %s, dest: %s", source, dest)
 	sourceFile, err := os.Open(source)
 	if err != nil {
 		return err
