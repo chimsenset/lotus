@@ -381,7 +381,7 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storiface.SectorRef, exis
 		pieceCID = paddedCid
 	}
 
-	if IsADTExist() && sb.isPledgeRequest(len(existingPieceSizes), pieceSize) {
+	if !IsADTExist() && sb.isPledgeRequest(len(existingPieceSizes), pieceSize) {
 		if err := SetADTData(stagedPath.Unsealed); err != nil {
 			log.Errorf("set pledge sector error: %s", err.Error())
 		}
