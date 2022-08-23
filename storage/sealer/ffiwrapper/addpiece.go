@@ -15,13 +15,13 @@ type addPieceTemplate struct {
 	cidPath    string
 }
 
-var adt *addPieceTemplate
+var instance *addPieceTemplate
 
 func GetADT() *addPieceTemplate {
-	if adt == nil {
+	if instance == nil {
 		return &addPieceTemplate{}
 	}
-	return adt
+	return instance
 }
 
 func ConfigADT(pledgeSectorPath string) {
