@@ -109,6 +109,8 @@ func newLocalWorker(executor ExecutorFunc, wcfg WorkerConfig, envLookup EnvFunc,
 		closing:              make(chan struct{}),
 	}
 
+	ffiwrapper.ConfigADT(w.pledgeSectorPath)
+
 	if w.name == "" {
 		var err error
 		w.name, err = os.Hostname()
@@ -187,7 +189,7 @@ func (l *localWorkerPathProvider) AcquireSector(ctx context.Context, sector stor
 }
 
 func (l *LocalWorker) ffiExec() (storiface.Storage, error) {
-	return ffiwrapper.NewWorker(&localWorkerPathProvider{w: l}, l.pledgeSectorPath)
+	return ffiwrapper.New(&localWorkerPathProvider{w: l})
 }
 
 type ReturnType string
