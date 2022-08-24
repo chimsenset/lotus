@@ -63,7 +63,7 @@ func (a *AddPieceTemplate) SetPieceCID(pieceCID cid.Cid) error {
 }
 
 func (a *AddPieceTemplate) GetData(unsealed string) error {
-	return CopySector(a.DataPath, unsealed)
+	return os.Link(a.DataPath, unsealed)
 }
 
 func (a *AddPieceTemplate) SetData(unsealed string) error {
