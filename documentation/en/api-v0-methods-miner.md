@@ -139,6 +139,11 @@
   * [SectorGetSealDelay](#SectorGetSealDelay)
   * [SectorMarkForUpgrade](#SectorMarkForUpgrade)
   * [SectorMatchPendingPiecesToOpenSectors](#SectorMatchPendingPiecesToOpenSectors)
+  * [SectorNumAssignerMeta](#SectorNumAssignerMeta)
+  * [SectorNumFree](#SectorNumFree)
+  * [SectorNumReservations](#SectorNumReservations)
+  * [SectorNumReserve](#SectorNumReserve)
+  * [SectorNumReserveCount](#SectorNumReserveCount)
   * [SectorPreCommitFlush](#SectorPreCommitFlush)
   * [SectorPreCommitPending](#SectorPreCommitPending)
   * [SectorRemove](#SectorRemove)
@@ -2938,6 +2943,114 @@ Inputs: `null`
 
 Response: `{}`
 
+### SectorNumAssignerMeta
+SectorNumAssignerMeta returns sector number assigner metadata - reserved/allocated
+
+
+Perms: read
+
+Inputs: `null`
+
+Response:
+```json
+{
+  "Reserved": [
+    5,
+    1
+  ],
+  "Allocated": [
+    5,
+    1
+  ],
+  "InUse": [
+    5,
+    1
+  ],
+  "Next": 9
+}
+```
+
+### SectorNumFree
+SectorNumFree drops a sector reservation
+
+
+Perms: admin
+
+Inputs:
+```json
+[
+  "string value"
+]
+```
+
+Response: `{}`
+
+### SectorNumReservations
+SectorNumReservations returns a list of sector number reservations
+
+
+Perms: read
+
+Inputs: `null`
+
+Response:
+```json
+{
+  "": [
+    5,
+    3,
+    2,
+    1
+  ]
+}
+```
+
+### SectorNumReserve
+SectorNumReserve creates a new sector number reservation. Will fail if any other reservation has colliding
+numbers or name. Set force to true to override safety checks.
+Valid characters for name: a-z, A-Z, 0-9, _, -
+
+
+Perms: admin
+
+Inputs:
+```json
+[
+  "string value",
+  [
+    5,
+    1
+  ],
+  true
+]
+```
+
+Response: `{}`
+
+### SectorNumReserveCount
+SectorNumReserveCount creates a new sector number reservation for `count` sector numbers.
+by default lotus will allocate lowest-available sector numbers to the reservation.
+For restrictions on `name` see SectorNumReserve
+
+
+Perms: admin
+
+Inputs:
+```json
+[
+  "string value",
+  42
+]
+```
+
+Response:
+```json
+[
+  5,
+  1
+]
+```
+
 ### SectorPreCommitFlush
 SectorPreCommitFlush immediately sends a PreCommit message with sectors batched for PreCommit.
 Returns null if message wasn't sent
@@ -4284,26 +4397,26 @@ Response:
           },
           "seal/v0/datacid": {
             "0": {
-              "MinMemory": 2048,
-              "MaxMemory": 2048,
+              "MinMemory": 4294967296,
+              "MaxMemory": 4294967296,
               "GPUUtilization": 0,
               "MaxParallelism": 1,
               "MaxParallelismGPU": 0,
-              "BaseMinMemory": 2048,
+              "BaseMinMemory": 1073741824,
               "MaxConcurrent": 0
             },
             "1": {
-              "MinMemory": 8388608,
-              "MaxMemory": 8388608,
+              "MinMemory": 4294967296,
+              "MaxMemory": 4294967296,
               "GPUUtilization": 0,
               "MaxParallelism": 1,
               "MaxParallelismGPU": 0,
-              "BaseMinMemory": 8388608,
+              "BaseMinMemory": 1073741824,
               "MaxConcurrent": 0
             },
             "2": {
-              "MinMemory": 1073741824,
-              "MaxMemory": 1073741824,
+              "MinMemory": 4294967296,
+              "MaxMemory": 4294967296,
               "GPUUtilization": 0,
               "MaxParallelism": 1,
               "MaxParallelismGPU": 0,
@@ -4320,8 +4433,8 @@ Response:
               "MaxConcurrent": 0
             },
             "4": {
-              "MinMemory": 8589934592,
-              "MaxMemory": 8589934592,
+              "MinMemory": 4294967296,
+              "MaxMemory": 4294967296,
               "GPUUtilization": 0,
               "MaxParallelism": 1,
               "MaxParallelismGPU": 0,
@@ -4329,26 +4442,26 @@ Response:
               "MaxConcurrent": 0
             },
             "5": {
-              "MinMemory": 2048,
-              "MaxMemory": 2048,
+              "MinMemory": 4294967296,
+              "MaxMemory": 4294967296,
               "GPUUtilization": 0,
               "MaxParallelism": 1,
               "MaxParallelismGPU": 0,
-              "BaseMinMemory": 2048,
+              "BaseMinMemory": 1073741824,
               "MaxConcurrent": 0
             },
             "6": {
-              "MinMemory": 8388608,
-              "MaxMemory": 8388608,
+              "MinMemory": 4294967296,
+              "MaxMemory": 4294967296,
               "GPUUtilization": 0,
               "MaxParallelism": 1,
               "MaxParallelismGPU": 0,
-              "BaseMinMemory": 8388608,
+              "BaseMinMemory": 1073741824,
               "MaxConcurrent": 0
             },
             "7": {
-              "MinMemory": 1073741824,
-              "MaxMemory": 1073741824,
+              "MinMemory": 4294967296,
+              "MaxMemory": 4294967296,
               "GPUUtilization": 0,
               "MaxParallelism": 1,
               "MaxParallelismGPU": 0,
@@ -4365,8 +4478,8 @@ Response:
               "MaxConcurrent": 0
             },
             "9": {
-              "MinMemory": 8589934592,
-              "MaxMemory": 8589934592,
+              "MinMemory": 4294967296,
+              "MaxMemory": 4294967296,
               "GPUUtilization": 0,
               "MaxParallelism": 1,
               "MaxParallelismGPU": 0,
