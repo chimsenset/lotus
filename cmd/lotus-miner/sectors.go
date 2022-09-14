@@ -2,9 +2,17 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/lotus/build"
+	"github.com/filecoin-project/lotus/storage/pipeline/lib/nullreader"
+	"github.com/filecoin-project/lotus/storage/sealer/ffiwrapper"
+	"github.com/filecoin-project/lotus/storage/sealer/ffiwrapper/basicfs"
+	"github.com/filecoin-project/lotus/storage/sealer/storiface"
+	"github.com/mitchellh/go-homedir"
 	"os"
 	"sort"
 	"strconv"
@@ -35,6 +43,7 @@ import (
 	"github.com/filecoin-project/lotus/lib/strle"
 	"github.com/filecoin-project/lotus/lib/tablewriter"
 	sealing "github.com/filecoin-project/lotus/storage/pipeline"
+	lbig "math/big"
 )
 
 var sectorsCmd = &cli.Command{
@@ -62,6 +71,7 @@ var sectorsCmd = &cli.Command{
 		sectorsBatching,
 		sectorsRefreshPieceMatchingCmd,
 		sectorsCompactPartitionsCmd,
+		recoveryCmd,
 	},
 }
 
@@ -2341,4 +2351,217 @@ var sectorsNumbersFreeCmd = &cli.Command{
 
 		return api.SectorNumFree(ctx, cctx.Args().First())
 	},
+}
+
+var recoveryCmd = &cli.Command{
+	Name:  "recovery",
+	Usage: "recovery sectors",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "storage-dir",
+			Value: "~/.lotus-recovery",
+			Usage: "Path to the storage directory that will store sectors long term",
+		},
+		&cli.StringFlag{
+			Name:  "sector-size",
+			Value: "32GiB",
+			Usage: "size of the sectors in bytes, i.e. 32GiB",
+		},
+		&cli.StringFlag{
+			Name:  "miner-id",
+			Value: "t01000",
+			Usage: "miner address",
+		},
+		&cli.StringFlag{
+			Name:  "ticket",
+			Value: "",
+			Usage: "ticket",
+		},
+		&cli.BoolFlag{
+			Name:  "clear",
+			Usage: "clear cache/data-layer cache/tree-d cache/tree-c (default false)",
+			Value: false,
+		},
+	},
+	//ArgsUsage: "[sector number]",
+	Action: func(cctx *cli.Context) error {
+		//api, closer, err := lcli.GetStorageMinerAPI(cctx)
+		//if err != nil {
+		//	return err
+		//}
+		//defer closer()
+		ctx := lcli.ReqContext(cctx)
+
+		if cctx.Args().Len() != 1 {
+			return xerrors.Errorf("expected 1 argument: [reservation name]")
+		}
+
+		sdir, err := homedir.Expand(cctx.String("storage-dir"))
+		if err != nil {
+			return err
+		}
+
+		err = os.MkdirAll(sdir, 0775) //nolint:gosec
+		if err != nil {
+			return xerrors.Errorf("creating sectorbuilder dir: %w", err)
+		}
+
+		// config proofs
+		sbfs := &basicfs.Provider{
+			Root: sdir,
+		}
+
+		sb, err := ffiwrapper.New(sbfs)
+		if err != nil {
+			return err
+		}
+
+		// sector-size
+		sectorSizeInt, err := units.RAMInBytes(cctx.String("sector-size"))
+		if err != nil {
+			return err
+		}
+
+		sectorSize := abi.SectorSize(sectorSizeInt)
+
+		// sector-id
+		sectoridInt, err := units.RAMInBytes(cctx.String("sector-id"))
+		if err != nil {
+			return err
+		}
+
+		sectorid := abi.SectorNumber(sectoridInt)
+
+		// miner-id
+		maddr, err := address.NewFromString(cctx.String("miner-id"))
+		if err != nil {
+			return err
+		}
+		amid, err := address.IDFromAddress(maddr)
+		if err != nil {
+			return err
+		}
+		mid := abi.ActorID(amid)
+
+		var sectorfullname = "s-" + cctx.String("miner-id") + "-" + cctx.String("sector-id")
+
+		// ticket
+		var ticketStr = cctx.String("ticket")
+		if len(ticketStr) != 64 {
+			return xerrors.Errorf("ticket len is fault.")
+		}
+		ticketHex, err := hex.DecodeString(ticketStr)
+		if err != nil {
+			return err
+		}
+		ticket := abi.SealRandomness(ticketHex[:])
+
+		// clear
+		var clear_cache = cctx.Bool("clear")
+
+		var sealTimings SealingResult
+		start := time.Now()
+
+		// start AddPiece
+		sid := storiface.SectorRef{
+			ID: abi.SectorID{
+				Miner:  mid,
+				Number: sectorid,
+			},
+			ProofType: spt(sectorSize),
+		}
+
+		log.Infof("[%d] Writing piece into sector...", 1)
+		log.Infof("recovery addPieceCmd sid=%v", sid)
+
+		pi, err := sb.AddPiece(ctx, sid, nil, abi.PaddedPieceSize(sectorSize).Unpadded(), nullreader.NewNullReader(abi.PaddedPieceSize(sectorSize).Unpadded()))
+		if err != nil {
+			return err
+		}
+
+		addpiece := time.Now()
+		pc1Start := time.Now()
+
+		pieces := []abi.PieceInfo{pi}
+		// start PreCommit1
+		log.Infof("[%d] Running replication(1)...", 1)
+
+		log.Infof("recovery preCommit1Cmd sid=%v", sid)
+		log.Infof("recovery preCommit1Cmd ticket=%v", ticketStr)
+		log.Infof("recovery preCommit1Cmd pieces=%v", pieces)
+
+		pc1o, err := sb.SealPreCommit1(ctx, sid, ticket, pieces)
+
+		if err != nil {
+			return xerrors.Errorf("commit: %w", err)
+		}
+
+		precommit1 := time.Now()
+		pc2Start := time.Now()
+
+		// start SealPreCommit2
+		log.Infof("[%d] Running replication(2)...", 1)
+
+		log.Infof("recovery preCommit2Cmd sid=%v ", sid)
+		log.Infof("recovery preCommit2Cmd pc1o=%v ", pc1o)
+		cids, err := sb.SealPreCommit2(ctx, sid, pc1o)
+		if err != nil {
+			return xerrors.Errorf("commit: %w", err)
+		}
+
+		precommit2 := time.Now()
+
+		// clear_cache
+		if !clear_cache {
+			var fileunsealed = sdir + "/unsealed/" + sectorfullname
+			if err := os.RemoveAll(fileunsealed); err != nil {
+				return xerrors.Errorf("remove existing sector cache from %s (sector %d): %w", fileunsealed, sectoridInt, err)
+			}
+			_ = sb.FinalizeSector(ctx, sid, nil)
+		}
+
+		sealTimings.AddPiece = addpiece.Sub(start)
+		sealTimings.PreCommit1 = precommit1.Sub(pc1Start)
+		sealTimings.PreCommit2 = precommit2.Sub(pc2Start)
+
+		fmt.Printf("----\nresults (v28) (%d)\n", sectorSize)
+		fmt.Printf("seal: addPiece: %s (%s)\n", sealTimings.AddPiece, bps(sectorSize, 1, sealTimings.AddPiece))
+		fmt.Printf("seal: preCommit phase 1: %s (%s)\n", sealTimings.PreCommit1, bps(sectorSize, 1, sealTimings.PreCommit1))
+		fmt.Printf("seal: preCommit phase 2: %s (%s)\n", sealTimings.PreCommit2, bps(sectorSize, 1, sealTimings.PreCommit2))
+
+		fmt.Printf("----\n")
+		fmt.Printf("%v \n", sectorfullname)
+		fmt.Printf("recovery  Ticket=%v \n", ticketStr)
+		fmt.Printf("recovery  CIDcommD=%v \n", cids.Unsealed.String())
+		fmt.Printf("recovery  CIDcommR=%v \n", cids.Sealed.String())
+
+		return nil
+	},
+}
+
+type SealingResult struct {
+	AddPiece   time.Duration
+	PreCommit1 time.Duration
+	PreCommit2 time.Duration
+	Commit1    time.Duration
+	Commit2    time.Duration
+	Verify     time.Duration
+	Unseal     time.Duration
+}
+
+func bps(sectorSize abi.SectorSize, sectorNum int, d time.Duration) string {
+	bdata := new(lbig.Int).SetUint64(uint64(sectorSize))
+	bdata = bdata.Mul(bdata, lbig.NewInt(int64(sectorNum)))
+	bdata = bdata.Mul(bdata, lbig.NewInt(time.Second.Nanoseconds()))
+	bps := bdata.Div(bdata, lbig.NewInt(d.Nanoseconds()))
+	return types.SizeStr(types.BigInt{Int: bps}) + "/s"
+}
+
+func spt(ssize abi.SectorSize) abi.RegisteredSealProof {
+	spt, err := lminer.SealProofTypeFromSectorSize(ssize, build.NewestNetworkVersion)
+	if err != nil {
+		panic(err)
+	}
+
+	return spt
 }
