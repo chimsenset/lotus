@@ -2373,6 +2373,11 @@ var recoveryCmd = &cli.Command{
 			Usage: "miner address",
 		},
 		&cli.StringFlag{
+			Name:  "sector-id",
+			Value: "10",
+			Usage: "sector number",
+		},
+		&cli.StringFlag{
 			Name:  "ticket",
 			Value: "",
 			Usage: "ticket",
