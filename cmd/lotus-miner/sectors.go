@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/go-units"
@@ -2397,8 +2398,8 @@ var recoveryCmd = &cli.Command{
 		//defer closer()
 		ctx := lcli.ReqContext(cctx)
 
-		if cctx.Args().Len() != 1 {
-			return xerrors.Errorf("expected 1 argument: [reservation name]")
+		if cctx.Args().Len() < 1 {
+			return xerrors.Errorf("expected more argument: [reservation name]")
 		}
 
 		sdir, err := homedir.Expand(cctx.String("storage-dir"))
@@ -2429,14 +2430,6 @@ var recoveryCmd = &cli.Command{
 
 		sectorSize := abi.SectorSize(sectorSizeInt)
 
-		// sector-id
-		sectoridInt, err := units.RAMInBytes(cctx.String("sector-id"))
-		if err != nil {
-			return err
-		}
-
-		sectorid := abi.SectorNumber(sectoridInt)
-
 		// miner-id
 		maddr, err := address.NewFromString(cctx.String("miner-id"))
 		if err != nil {
@@ -2448,98 +2441,118 @@ var recoveryCmd = &cli.Command{
 		}
 		mid := abi.ActorID(amid)
 
-		var sectorfullname = "s-" + cctx.String("miner-id") + "-" + cctx.String("sector-id")
-
-		// ticket
-		var ticketStr = cctx.String("ticket")
-		if len(ticketStr) != 64 {
-			return xerrors.Errorf("ticket len is fault.")
-		}
-		ticketHex, err := hex.DecodeString(ticketStr)
-		if err != nil {
-			return err
-		}
-		ticket := abi.SealRandomness(ticketHex[:])
-
 		// clear
 		var clear_cache = cctx.Bool("clear")
 
 		var sealTimings SealingResult
 		start := time.Now()
 
-		// start AddPiece
-		sid := storiface.SectorRef{
-			ID: abi.SectorID{
-				Miner:  mid,
-				Number: sectorid,
-			},
-			ProofType: spt(sectorSize),
+		var wg sync.WaitGroup
+
+		for _, v := range cctx.Args().Slice() {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				st := strings.Split(v, "-")
+				si, err := strconv.ParseUint(st[0], 10, 64)
+				if err != nil {
+					log.Errorf("parse uint error: %s", err.Error())
+				}
+				sectorid := abi.SectorNumber(si)
+				sectorfullname := "s-" + cctx.String("miner-id") + "-" + st[0]
+				ticketStr := st[1]
+				if len(ticketStr) != 64 {
+					log.Error("ticket len is fault.")
+					return
+				}
+				ticketHex, err := hex.DecodeString(ticketStr)
+				if err != nil {
+					log.Error("ticket decode is fault.")
+					return
+				}
+
+				ticket := abi.SealRandomness(ticketHex[:])
+
+				// start AddPiece
+				sid := storiface.SectorRef{
+					ID: abi.SectorID{
+						Miner:  mid,
+						Number: sectorid,
+					},
+					ProofType: spt(sectorSize),
+				}
+
+				log.Infof("[%d] Writing piece into sector...", 1)
+				log.Infof("recovery addPieceCmd sid=%v", sid)
+
+				pi, err := sb.AddPiece(ctx, sid, nil, abi.PaddedPieceSize(sectorSize).Unpadded(), nullreader.NewNullReader(abi.PaddedPieceSize(sectorSize).Unpadded()))
+				if err != nil {
+					log.Errorf("ap error: %s", err.Error())
+					return
+				}
+
+				addpiece := time.Now()
+				pc1Start := time.Now()
+
+				pieces := []abi.PieceInfo{pi}
+				// start PreCommit1
+				log.Infof("[%d] Running replication(1)...", 1)
+
+				log.Infof("recovery preCommit1Cmd sid=%v", sid)
+				log.Infof("recovery preCommit1Cmd ticket=%v", ticketStr)
+				log.Infof("recovery preCommit1Cmd pieces=%v", pieces)
+
+				pc1o, err := sb.SealPreCommit1(ctx, sid, ticket, pieces)
+
+				if err != nil {
+					log.Errorf("commit: %s", err.Error())
+					return
+				}
+
+				precommit1 := time.Now()
+				pc2Start := time.Now()
+
+				// start SealPreCommit2
+				log.Infof("[%d] Running replication(2)...", 1)
+
+				log.Infof("recovery preCommit2Cmd sid=%v ", sid)
+				log.Infof("recovery preCommit2Cmd pc1o=%v ", pc1o)
+				cids, err := sb.SealPreCommit2(ctx, sid, pc1o)
+				if err != nil {
+					log.Errorf("commit: %s", err.Error())
+					return
+				}
+
+				precommit2 := time.Now()
+
+				// clear_cache
+				if !clear_cache {
+					var fileunsealed = sdir + "/unsealed/" + sectorfullname
+					if err := os.RemoveAll(fileunsealed); err != nil {
+						log.Errorf("remove existing sector cache from %s (sector %s): %s", fileunsealed, st[0], err.Error())
+						return
+					}
+					_ = sb.FinalizeSector(ctx, sid, nil)
+				}
+
+				sealTimings.AddPiece = addpiece.Sub(start)
+				sealTimings.PreCommit1 = precommit1.Sub(pc1Start)
+				sealTimings.PreCommit2 = precommit2.Sub(pc2Start)
+
+				fmt.Printf("----\nresults (v28) (%d)\n", sectorSize)
+				fmt.Printf("seal: addPiece: %s (%s)\n", sealTimings.AddPiece, bps(sectorSize, 1, sealTimings.AddPiece))
+				fmt.Printf("seal: preCommit phase 1: %s (%s)\n", sealTimings.PreCommit1, bps(sectorSize, 1, sealTimings.PreCommit1))
+				fmt.Printf("seal: preCommit phase 2: %s (%s)\n", sealTimings.PreCommit2, bps(sectorSize, 1, sealTimings.PreCommit2))
+
+				fmt.Printf("----\n")
+				fmt.Printf("%v \n", sectorfullname)
+				fmt.Printf("recovery  Ticket=%v \n", ticketStr)
+				fmt.Printf("recovery  CIDcommD=%v \n", cids.Unsealed.String())
+				fmt.Printf("recovery  CIDcommR=%v \n", cids.Sealed.String())
+			}()
 		}
 
-		log.Infof("[%d] Writing piece into sector...", 1)
-		log.Infof("recovery addPieceCmd sid=%v", sid)
-
-		pi, err := sb.AddPiece(ctx, sid, nil, abi.PaddedPieceSize(sectorSize).Unpadded(), nullreader.NewNullReader(abi.PaddedPieceSize(sectorSize).Unpadded()))
-		if err != nil {
-			return err
-		}
-
-		addpiece := time.Now()
-		pc1Start := time.Now()
-
-		pieces := []abi.PieceInfo{pi}
-		// start PreCommit1
-		log.Infof("[%d] Running replication(1)...", 1)
-
-		log.Infof("recovery preCommit1Cmd sid=%v", sid)
-		log.Infof("recovery preCommit1Cmd ticket=%v", ticketStr)
-		log.Infof("recovery preCommit1Cmd pieces=%v", pieces)
-
-		pc1o, err := sb.SealPreCommit1(ctx, sid, ticket, pieces)
-
-		if err != nil {
-			return xerrors.Errorf("commit: %w", err)
-		}
-
-		precommit1 := time.Now()
-		pc2Start := time.Now()
-
-		// start SealPreCommit2
-		log.Infof("[%d] Running replication(2)...", 1)
-
-		log.Infof("recovery preCommit2Cmd sid=%v ", sid)
-		log.Infof("recovery preCommit2Cmd pc1o=%v ", pc1o)
-		cids, err := sb.SealPreCommit2(ctx, sid, pc1o)
-		if err != nil {
-			return xerrors.Errorf("commit: %w", err)
-		}
-
-		precommit2 := time.Now()
-
-		// clear_cache
-		if !clear_cache {
-			var fileunsealed = sdir + "/unsealed/" + sectorfullname
-			if err := os.RemoveAll(fileunsealed); err != nil {
-				return xerrors.Errorf("remove existing sector cache from %s (sector %d): %w", fileunsealed, sectoridInt, err)
-			}
-			_ = sb.FinalizeSector(ctx, sid, nil)
-		}
-
-		sealTimings.AddPiece = addpiece.Sub(start)
-		sealTimings.PreCommit1 = precommit1.Sub(pc1Start)
-		sealTimings.PreCommit2 = precommit2.Sub(pc2Start)
-
-		fmt.Printf("----\nresults (v28) (%d)\n", sectorSize)
-		fmt.Printf("seal: addPiece: %s (%s)\n", sealTimings.AddPiece, bps(sectorSize, 1, sealTimings.AddPiece))
-		fmt.Printf("seal: preCommit phase 1: %s (%s)\n", sealTimings.PreCommit1, bps(sectorSize, 1, sealTimings.PreCommit1))
-		fmt.Printf("seal: preCommit phase 2: %s (%s)\n", sealTimings.PreCommit2, bps(sectorSize, 1, sealTimings.PreCommit2))
-
-		fmt.Printf("----\n")
-		fmt.Printf("%v \n", sectorfullname)
-		fmt.Printf("recovery  Ticket=%v \n", ticketStr)
-		fmt.Printf("recovery  CIDcommD=%v \n", cids.Unsealed.String())
-		fmt.Printf("recovery  CIDcommR=%v \n", cids.Sealed.String())
-
+		wg.Wait()
 		return nil
 	},
 }
